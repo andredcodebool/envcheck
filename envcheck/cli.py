@@ -1,76 +1,66 @@
-"""CLI entry point for envcheck."""
+"""Main CLI entry-point for envcheck."""
 from __future__ import annotations
 
-import os
 import sys
-from pathlib import Path
 
 import click
 
-from .checker import check_env
-from .config import ConfigError, find_config, get_profiles, load_config
-from .loader import LoadError, load_from_dir, load_from_env, load_from_file
-from .reporter import format_result, format_summary
+from envcheck.checker import check_env
+from envcheck.config import ConfigError, find_config, get_profiles, load_config
+from envcheck.loader import LoadError, load_from_env, load_from_file
+from envcheck.reporter import format_result, format_summary
+from envcheck.cli_audit import audit_group
+from envcheck.cli_compare import compare_group
+from envcheck.cli_template import template_group
+from envcheck.cli_lint import lint_group
+from envcheck.cli_transform import transform_group
+from envcheck.cli_interpolate import interpolate_group
 
 
 @click.group()
+@click.version_option()
 def cli() -> None:
     """envcheck — audit and validate environment variable configs."""
 
 
+cli.add_command(audit_group)
+cli.add_command(compare_group)
+cli.add_command(template_group)
+cli.add_command(lint_group)
+cli.add_command(transform_group)
+cli.add_command(interpolate_group)
+
+
 @cli.command()
-@click.option("--env-file", "-e", default=None, help="Path to .env file to validate.")
-@click.option("--env-dir", "-d", default=None, help="Directory of .env files.")
-@click.option("--profile", "-p", multiple=True, help="Profile(s) to validate against.")
-@click.option("--config", "-c", default=None, help="Path to envcheck config file.")
-@click.option("--use-process-env", is_flag=True, default=False, help="Use current process environment.")
-@click.option("--strict", is_flag=True, default=False, help="Fail on extra keys too.")
-def check(
-    env_file: str | None,
-    env_dir: str | None,
-    profile: tuple[str, ...],
-    config: str | None,
-    use_process_env: bool,
-    strict: bool,
-) -> None:
-    """Validate an environment against one or more profiles."""
+@click.argument("env_file", type=click.Path(exists=True))
+@click.option("--profile", default=None, help="Profile name from config.")
+@click.option("--config", "config_path", default=None, type=click.Path(), help="Config file.")
+@click.option("--strict", is_flag=True, help="Fail on extra keys.")
+def check(env_file: str, profile: str | None, config_path: str | None, strict: bool) -> None:
+    """Check ENV_FILE against a profile's required keys."""
     try:
-        config_path = Path(config) if config else find_config()
-        cfg = load_config(config_path) if config_path else {}
+        cfg_path = config_path or find_config()
+        cfg = load_config(cfg_path) if cfg_path else {}
         profiles = get_profiles(cfg)
     except ConfigError as exc:
         click.echo(f"Config error: {exc}", err=True)
-        sys.exit(2)
+        sys.exit(1)
+
+    profile_name = profile or next(iter(profiles), None)
+    prof = profiles.get(profile_name) if profile_name else None
+    required = list(prof.required) if prof else []
 
     try:
-        if use_process_env:
-            env = load_from_env()
-        elif env_dir:
-            env = load_from_dir(Path(env_dir))
-        elif env_file:
-            env = load_from_file(Path(env_file))
-        else:
-            env = load_from_env()
+        env = load_from_file(env_file)
     except LoadError as exc:
         click.echo(f"Load error: {exc}", err=True)
-        sys.exit(2)
-
-    selected = [p for p in profiles if not profile or p.name in profile]
-    if not selected:
-        click.echo("No profiles found to check against.", err=True)
-        sys.exit(2)
-
-    results = [check_env(env, p.required, p.optional) for p in selected]
-    for prof, result in zip(selected, results):
-        click.echo(f"Profile: {prof.name}")
-        click.echo(format_result(result))
-
-    click.echo(format_summary(results))
-    if any(not r.ok for r in results):
         sys.exit(1)
-    if strict and any(r.extra for r in results):
+
+    result = check_env(env, required, strict=strict)
+    click.echo(format_result(result, label=env_file))
+    if not result.ok:
         sys.exit(1)
 
 
-def main() -> None:
+def main() -> None:  # pragma: no cover
     cli()
