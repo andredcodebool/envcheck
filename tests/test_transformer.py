@@ -24,6 +24,13 @@ def test_rename_keys_missing_source_skipped():
     assert set(result.keys()) == set(ENV.keys())
 
 
+def test_rename_keys_does_not_mutate_input():
+    original = {"HOST": "localhost", "PORT": "5432"}
+    rename_keys(original, {"HOST": "DB_HOST"})
+    assert "HOST" in original
+    assert "DB_HOST" not in original
+
+
 def test_filter_keys_include():
     result = filter_keys(ENV, include=["HOST", "PORT"])
     assert set(result.keys()) == {"HOST", "PORT"}
@@ -64,6 +71,14 @@ def test_merge_envs_first_wins():
 def test_merge_envs_invalid_strategy():
     with pytest.raises(ValueError, match="strategy"):
         merge_envs({}, strategy="unknown")
+
+
+def test_merge_envs_does_not_mutate_inputs():
+    a = {"A": "1", "B": "2"}
+    b = {"B": "99", "C": "3"}
+    merge_envs(a, b, strategy="last")
+    assert a == {"A": "1", "B": "2"}
+    assert b == {"B": "99", "C": "3"}
 
 
 def test_prefix_keys():
